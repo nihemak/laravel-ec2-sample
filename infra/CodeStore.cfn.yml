@@ -1,0 +1,20 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: CodeCommit Template
+Resources:
+  CodeCommitRepo:
+    Type: AWS::CodeCommit::Repository
+    Properties:
+      RepositoryName: laravel-ec2-sample
+Outputs:
+  CodeCommitRepoArn:
+    Value: !Ref CodeCommitRepo
+    Export:
+      Name: !Sub "${AWS::StackName}-CodeCommitRepoArn"
+  CodeCommitRepoName:
+    Value: !GetAtt [ CodeCommitRepo, Name ]
+    Export:
+      Name: !Sub "${AWS::StackName}-CodeCommitRepoName"
+  CodeCommitRepoCloneUrlHttp:
+    Value: !GetAtt [ CodeCommitRepo, CloneUrlHttp ]
+    Export:
+      Name: !Sub "${AWS::StackName}-CodeCommitRepoCloneUrlHttp"

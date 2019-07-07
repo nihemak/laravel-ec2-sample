@@ -1,0 +1,205 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: CodePipeline Template
+Parameters:
+  CodeCommitStackName:
+    Type: String
+Resources:
+  BuildCacheS3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: test-laravel-codebuild-cache
+  BuildServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - codebuild.amazonaws.com
+            Action:
+                - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AdministratorAccess
+      RoleName: laravel-ec2-sample-build
+  BuildProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: laravel-ec2-sample
+      ServiceRole: !Ref BuildServiceRole
+      Artifacts:
+        Type: NO_ARTIFACTS
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: !Sub ${AWS::AccountId}.dkr.ecr.ap-northeast-1.amazonaws.com/test-laravel
+      Source:
+        Type: CODECOMMIT
+        Location:
+          Fn::ImportValue: !Sub ${CodeCommitStackName}-CodeCommitRepoCloneUrlHttp
+        BuildSpec: buildspec.yml
+      Cache:
+        Location:
+          Ref: BuildCacheS3Bucket
+        Type: S3
+  DeployServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - codedeploy.amazonaws.com
+            Action:
+                - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSCodeDeployRole
+      RoleName: test-laravel-deploy
+  DeployApplication:
+    Type: AWS::CodeDeploy::Application
+    Properties:
+      ApplicationName: test-laravel
+  DeployGroup:
+    Type: AWS::CodeDeploy::DeploymentGroup
+    Properties:
+      ApplicationName:
+        Ref: DeployApplication
+      DeploymentConfigName: CodeDeployDefault.AllAtOnce
+      DeploymentGroupName: test-laravel
+      Ec2TagFilters: 
+        - 
+          Key: Name
+          Value: test-laravel
+          Type: KEY_AND_VALUE
+      ServiceRoleArn: 
+        Fn::GetAtt: [ DeployServiceRole, Arn ]
+  PipelineS3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: test-laravel-pipeline
+  PipelineServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - codepipeline.amazonaws.com
+            Action:
+                - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AdministratorAccess
+      RoleName: test-larabel-pipeline
+  Pipeline:
+    Type: AWS::CodePipeline::Pipeline
+    Properties:
+      Name: test-laravel
+      RoleArn:
+        Fn::GetAtt: [ PipelineServiceRole, Arn ]
+      Stages: 
+        - 
+          Name: Source
+          Actions: 
+            - 
+              Name: Source
+              ActionTypeId: 
+                Category: Source
+                Owner: AWS
+                Version: 1
+                Provider: CodeCommit
+              OutputArtifacts: 
+                - 
+                  Name: SourceArtifact
+              Configuration:
+                PollForSourceChanges: True
+                RepositoryName:
+                  Fn::ImportValue: !Sub ${CodeCommitStackName}-CodeCommitRepoName
+                BranchName: master
+              RunOrder: 1
+        - 
+          Name: Build
+          Actions: 
+            - 
+              Name: Build
+              InputArtifacts: 
+                - 
+                  Name: SourceArtifact
+              OutputArtifacts: 
+                - 
+                  Name: BuildArtifact
+              ActionTypeId: 
+                Category: Build
+                Owner: AWS
+                Version: 1
+                Provider: CodeBuild
+              Configuration: 
+                ProjectName:
+                  Ref: BuildProject
+              RunOrder: 1
+        - 
+          Name: Deploy
+          Actions: 
+            - 
+              Name: Deploy
+              InputArtifacts: 
+                - 
+                  Name: BuildArtifact
+              ActionTypeId: 
+                Category: Deploy
+                Owner: AWS
+                Version: 1
+                Provider: CodeDeploy
+              Configuration: 
+                ApplicationName: 
+                  Ref: DeployApplication
+                DeploymentGroupName: 
+                  Ref: DeployGroup
+              RunOrder: 1
+      ArtifactStore: 
+        Type: S3
+        Location: 
+          Ref: PipelineS3Bucket
+  EventServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - events.amazonaws.com
+            Action:
+                - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AdministratorAccess
+      RoleName: test-laravel-cwe
+  EventRule:
+    Type: AWS::Events::Rule
+    Properties:
+      EventPattern:      
+        source:
+          - aws.codecommit
+        detail-type:
+          - CodeCommit Repository State Change
+        resources:
+          - Fn::ImportValue: !Sub ${CodeCommitStackName}-CodeCommitRepoArn
+        detail:
+          event:
+            - referenceCreated
+            - referenceUpdated
+          referenceType:
+            - branch
+          referenceName:
+            - master
+      Name: TestLaravel
+      Targets:
+        - Id: 1
+          Arn: !Sub arn:aws:codepipeline:ap-northeast-1:${AWS::AccountId}:test-laravel
+          RoleArn:
+            Fn::GetAtt: [ EventServiceRole, Arn ]

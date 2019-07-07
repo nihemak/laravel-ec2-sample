@@ -1,0 +1,101 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: EC2 Template
+Parameters:
+  NetworkStackName:
+    Type: String
+Resources:
+  SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: test-laravel
+      GroupDescription: "test laravel"
+      SecurityGroupIngress:
+        - CidrIp: 0.0.0.0/0
+          FromPort: 22
+          IpProtocol: tcp
+          ToPort: 22
+        - CidrIp: 0.0.0.0/0
+          FromPort: 80
+          IpProtocol: tcp
+          ToPort: 80
+        - CidrIp: 0.0.0.0/0
+          FromPort: 443
+          IpProtocol: tcp
+          ToPort: 443
+      VpcId:
+        Fn::ImportValue: !Sub ${NetworkStackName}-VpcId
+  ElasticIP:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+  EC2IAMRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: test-laravel-ec2
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement: 
+          -
+            Effect: Allow
+            Principal:
+              Service:
+                - ec2.amazonaws.com
+            Action:
+              - sts:AssumeRole
+  EC2IAMPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: test-laravel-ec2
+      Roles:
+        - Ref: EC2IAMRole
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          -
+            Effect: Allow
+            Resource: "*"
+            Action:
+              - "s3:Get*"
+              - "s3:List*"
+  EC2IAMInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - Ref: EC2IAMRole
+  EC2Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      IamInstanceProfile:
+        Ref: EC2IAMInstanceProfile
+      ImageId: ami-0a2de1c3b415889d2
+      InstanceType: t2.micro
+      SubnetId:
+        Fn::ImportValue: !Sub ${NetworkStackName}-PublicSubnetId
+      KeyName: test-laravel
+      UserData: !Base64
+        Fn::Sub: |
+          #!/bin/bash
+          yum -y update
+          amazon-linux-extras install ansible2 nginx1.12 php7.3 -y
+          yum install -y php-fpm php-mbstring php-xml php-bcmath
+          yum install -y python2-pip ruby
+          cd /home/ec2-user
+          curl -O https://aws-codedeploy-${AWS::Region}.s3.amazonaws.com/latest/install
+          chmod +x ./install
+          ./install auto
+      SecurityGroupIds: 
+        - !Ref SecurityGroup
+      Tags:
+        - Key: Name
+          Value: test-laravel
+  EC2EIPAssociation:
+    Type: AWS::EC2::EIPAssociation
+    Properties:
+      InstanceId: !Ref EC2Instance
+      EIP: !Ref ElasticIP
+Outputs:
+  EC2IP:
+    Value:
+      Fn::GetAtt:
+        - EC2Instance
+        - PublicIp
