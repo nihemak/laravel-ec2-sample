@@ -3,8 +3,8 @@
 ## Create CodeCommit
 
 ```bash
-git clone --mirror https://github.com/nihemak/laravel-ec2-sample.git
-cd laravel-ec2-sample.git
+git clone https://github.com/nihemak/laravel-ec2-sample.git
+cd laravel-ec2-sample
 aws cloudformation validate-template \
     --template-body file://infra/CodeStore.cfn.yml
 aws cloudformation create-stack \
